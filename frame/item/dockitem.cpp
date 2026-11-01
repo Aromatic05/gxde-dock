@@ -427,6 +427,12 @@ void DockItem::showPopupApplet(QWidget * const applet)
     if (PopupWindow->model())
         return;
 
+    // the press half of this click already dismissed the very same applet
+    // (through the mask on Wayland or the global monitor on X11): the release
+    // must not pop it right back open, the click was meant to close it
+    if (PopupWindow->wasJustDismissed(applet))
+        return;
+
     showPopupWindow(applet, true);
 }
 

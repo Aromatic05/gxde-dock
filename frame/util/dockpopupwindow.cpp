@@ -24,8 +24,9 @@
 #include "wayland/layershellhelper.h"
 #include "wayland/layershell_styler.h"
 
-#include <DApplication> 
+#include <DApplication>
 #include <DPlatformWindowHandle>
+#include <QDateTime>
 #include <QTimer>
 #include <QScreen>
 #include <QApplication>
@@ -55,6 +56,9 @@ constexpr int kMarkPointGap = 2;
 constexpr int kOpenDuration = 150;
 constexpr int kCloseDuration = 180;
 constexpr qreal kOpenStartSize = 0.3;
+// a click that closes the popup takes this long at most from the press (which
+// dismisses it) to the release (which must not reopen it)
+constexpr int kDismissGraceMs = 500;
 }
 
 // Covers the popup during its animation, and paints the popup as it looked
@@ -149,6 +153,22 @@ bool DockPopupWindow::model() const
     return isVisible() && m_model && m_animation != Animation::Closing;
 }
 
+void DockPopupWindow::markDismissed()
+{
+    m_dismissedContent = getContent();
+    m_dismissedAt = QDateTime::currentMSecsSinceEpoch();
+}
+
+bool DockPopupWindow::wasJustDismissed(const QWidget *content)
+{
+    if (m_dismissedContent != content)
+        return false;
+
+    // one shot: consumed even when expired
+    m_dismissedContent = nullptr;
+    return QDateTime::currentMSecsSinceEpoch() - m_dismissedAt < kDismissGraceMs;
+}
+
 void DockPopupWindow::setContent(QWidget *content)
 {
     QWidget *lastWidget = getContent();
@@ -170,6 +190,9 @@ void DockPopupWindow::show(const QPoint &pos, const bool model)
         && (!isVisible() || m_animation == Animation::Closing || !m_model || getContent() != m_openedContent);
     if (m_animation == Animation::Closing)
         stopAnimation();
+
+    // whatever is being shown now, no click is dismissing it anymore
+    m_dismissedContent = nullptr;
 
     m_model = model;
     m_lastPoint = pos;
@@ -592,6 +615,11 @@ void DockPopupWindow::onGlobMouseRelease(const QPoint &mousePos, const int flag)
     if (this->frameGeometry().contains(mousePos))
         return;
 
+    // only the left button can reopen the applet on release, so only that
+    // press needs to be remembered
+    if (flag == DRegionMonitor::WatchedFlags::Button_Left)
+        markDismissed();
+
     emit accept();
 
     if (m_regionInter->registered()) {
@@ -661,6 +689,10 @@ void DockPopupMask::mousePressEvent(QMouseEvent *event)
 {
     Q_UNUSED(event);
     if (m_popup && m_popup->isVisible()) {
+        // only a left press can reopen the applet on release, so only that
+        // press needs to be remembered
+        if (event->button() == Qt::LeftButton)
+            m_popup->markDismissed();
         m_popup->hide();
         emit m_popup->accept();
     }

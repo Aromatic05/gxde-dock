@@ -53,6 +53,11 @@ public:
 
     void setContent(QWidget *content);
 
+    // 记录弹出窗口被一次点击的按下阶段交互式关闭(点击遮罩或窗口外区域),
+    // 同一次点击的抬起阶段不应再把它弹回来, showPopupApplet 据此拦截
+    void markDismissed();
+    bool wasJustDismissed(const QWidget *content);
+
 public slots:
     void show(const QPoint &pos, const bool model = false);
     void show(const int x, const int y);
@@ -125,6 +130,10 @@ private:
     QPointer<QWidget> m_openedContent;
 
     QTimer *m_acceptDelayTimer;
+
+    // the content the last interactive dismissal closed, and when
+    QPointer<QWidget> m_dismissedContent;
+    qint64 m_dismissedAt = 0;
 
     DRegionMonitor *m_regionInter;
     DWindowManagerHelper *m_wmHelper;
