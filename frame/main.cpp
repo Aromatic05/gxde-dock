@@ -50,6 +50,8 @@
 #include <QStringList>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QThread>
+#include <xcb/xcb.h>
 
 #include <LayerShellQt/Shell>
 
@@ -195,6 +197,40 @@ void launchDeepinMenu()
     }
 }
 
+// DXcb chooses its backing-store path when QApplication is constructed.
+// During X11 login KWin may have started without owning the compositing
+// selection yet. Give it a bounded opportunity to finish before loading DXcb;
+// desktops with compositing disabled must still be able to start the dock.
+static void waitForX11Compositor() {
+    int screenNumber = 0;
+    xcb_connection_t *connection = xcb_connect(nullptr, &screenNumber);
+    if (xcb_connection_has_error(connection)) {
+        xcb_disconnect(connection);
+        return;
+    }
+    const QByteArray selection = QByteArray("_NET_WM_CM_S")
+        + QByteArray::number(screenNumber);
+    auto *atom = xcb_intern_atom_reply(connection,
+        xcb_intern_atom(connection, false, selection.size(), selection.constData()), nullptr);
+    if (atom) {
+        QElapsedTimer elapsed;
+        elapsed.start();
+        while (elapsed.elapsed() < 2000) {
+            auto *owner = xcb_get_selection_owner_reply(connection,
+                xcb_get_selection_owner(connection, atom->atom), nullptr);
+            const bool ready = owner && owner->owner != XCB_WINDOW_NONE;
+            free(owner);
+            if (ready || xcb_connection_has_error(connection)) {
+                break;
+            }
+            QThread::msleep(25);
+        }
+        qInfo() << "(Dock) X11 compositor startup wait:" << elapsed.elapsed() << "ms";
+        free(atom);
+    }
+    xcb_disconnect(connection);
+}
+
 int main(int argc, char *argv[])
 {
     // 以前dock不支持原生Wayland所以在Wayland下加D-XCB
@@ -211,6 +247,7 @@ int main(int argc, char *argv[])
         launchDeepinMenu();
         LayerShellQt::Shell::useLayerShell();
     } else {
+        waitForX11Compositor();
         DApplication::loadDXcbPlugin();
     }
 
