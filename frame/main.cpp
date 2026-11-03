@@ -21,6 +21,7 @@
 
 #include "window/mainwindow.h"
 #include "controller/dockitemcontroller.h"
+#include "util/servicerestarttracker.h"
 #include "util/themeappicon.h"
 #include "wayland/layershellhelper.h"
 #include "wayland/xsettings.h"
@@ -347,6 +348,12 @@ int main(int argc, char *argv[])
         &app, &QCoreApplication::quit);
 
     if (!waylandSession) {
+        const QDBusReply<bool> kwinRegistered =
+            QDBusConnection::sessionBus().interface()->isServiceRegistered(
+                QStringLiteral("org.kde.KWin"));
+        ServiceRestartTracker kwinRestartTracker(
+            kwinRegistered.isValid() && kwinRegistered.value());
+
         auto* windowManagerWatcher = new QDBusServiceWatcher(
             QStringLiteral("org.kde.KWin"),
             QDBusConnection::sessionBus(),
@@ -357,9 +364,13 @@ int main(int argc, char *argv[])
             windowManagerWatcher,
             &QDBusServiceWatcher::serviceOwnerChanged,
             &app,
-            [&app](const QString &, const QString &oldOwner,
-                    const QString &newOwner) {
-                if (oldOwner != newOwner && !newOwner.isEmpty()) {
+            [&app, kwinRestartTracker](const QString &, const QString &oldOwner,
+                                       const QString &newOwner) mutable {
+                // KWin commonly registers after dock on X11 login.
+                // This caused approximately 10s wait.
+                // Only register the dock after KWin is ready.
+                if (kwinRestartTracker.ownerChanged(!oldOwner.isEmpty(),
+                                                    !newOwner.isEmpty())) {
                     QTimer::singleShot(500, &app, &QCoreApplication::quit);
                 }
             });

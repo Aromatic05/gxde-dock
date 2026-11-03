@@ -4,6 +4,8 @@ set(VERSION 4.0)
 
 project(gxde-dock)
 
+include(CTest)
+
 #set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
@@ -45,6 +47,10 @@ add_subdirectory("cmake/libdbusmenu")
 
 add_subdirectory("frame")
 add_subdirectory("plugins")
+
+if (BUILD_TESTING)
+    add_subdirectory("tests")
+endif ()
 
 # Install settings
 if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
