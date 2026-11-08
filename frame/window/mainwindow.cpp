@@ -1092,7 +1092,9 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *e)
 {
     if (watched == m_mainPanel && (e->type() == QEvent::Move || e->type() == QEvent::Resize)) {
         update();
-        if (Dock::isV20Mode())
+        const bool ownsX11V23Blur = !Wayland::LayerShellHelper::isWayland()
+            && m_settings->displayMode() == Dock::V23;
+        if (Dock::isV20Mode() || ownsX11V23Blur)
             updateShadowRegions();
     }
 
