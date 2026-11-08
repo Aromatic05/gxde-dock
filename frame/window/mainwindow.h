@@ -69,6 +69,8 @@ private:
 
     int shadowSize() const;
     QSize surfaceSize(const QSize &panelSize, const Position position) const;
+    QPoint surfacePosition(const QPoint &panelPosition, const Position position) const;
+    QPoint panelPosition(const QPoint &surfacePosition, const Position position) const;
     QPoint panelOffset(const Position position) const;
     QRect panelRestRect() const;
     void updateShadowRegions(const bool forceStyle = false);

@@ -470,7 +470,11 @@ void MainWindow::initConnections()
     connect(m_mainPanel, &MainPanel::requestWindowAutoHide, m_settings, &DockSettings::setAutoHide);
     connect(m_mainPanel, &MainPanel::geometryChanged, this, &MainWindow::panelGeometryChanged);
     connect(m_mainPanel, &MainPanel::v20CapsulesChanged, this, [this] {
-        updateShadowRegions(!Wayland::LayerShellHelper::isWayland());
+        const bool x11 = !Wayland::LayerShellHelper::isWayland();
+        updateShadowRegions(x11);
+        if (x11) {
+            update();
+        }
     });
     connect(m_settings, &DockSettings::v20CapsuleChanged, this, &MainWindow::setStrutPartial, Qt::QueuedConnection);
 
@@ -550,6 +554,10 @@ void MainWindow::positionChanged(const Position prevPos)
     QTimer::singleShot(600, this, [&] {
         m_updatePanelVisible = true;
         updatePanelVisible();
+        if (!Wayland::LayerShellHelper::isWayland()) {
+            // Shadow issue only presents on X11...
+            updateShadowRegions(true);
+        }
     });
 }
 
@@ -566,6 +574,11 @@ void MainWindow::updatePosition()
 
     QTimer::singleShot(duration, this, &MainWindow::setStrutPartial);
     QTimer::singleShot(duration, this, &MainWindow::updatePanelVisible);
+    QTimer::singleShot(duration + 50, this, [this] {
+        if (!Wayland::LayerShellHelper::isWayland()) {
+            updateShadowRegions(true);
+        }
+    });
 }
 
 void MainWindow::updateGeometry()
@@ -610,11 +623,15 @@ void MainWindow::updateGeometry()
     }
 
     const QRect windowRect = m_settings->windowRect(position, isHide, m_screen);
+    const QPoint windowPosition = isHide
+        ? windowRect.topLeft()
+        : surfacePosition(windowRect.topLeft(), position);
 
-    if (animation)
-        internalAnimationMove(windowRect.x(), windowRect.y());
-    else
-        internalMove(windowRect.topLeft());
+    if (animation) {
+        internalAnimationMove(windowPosition.x(), windowPosition.y());
+    } else {
+        internalMove(windowPosition);
+    }
 
     m_mainPanel->update();
     m_shadowMaskOptimizeTimer->start();
@@ -659,7 +676,8 @@ void MainWindow::setStrutPartial()
     const int maxScreenHeight = m_settings->screenRawHeight();
     const int maxScreenWidth = m_settings->screenRawWidth();
     const Position side = m_settings->position();
-    const QPoint &p = rawXPosition(m_posChangeAni->endValue().toPoint());
+    const QPoint p = rawXPosition(panelPosition(
+        m_posChangeAni->endValue().toPoint(), side));
     const QSize &s = m_settings->windowSize(m_screen);
     const QRect &primaryRawRect = m_settings->primaryRawRect();
     const int gap = qRound(v20Gap * ratio);
@@ -804,9 +822,10 @@ void MainWindow::resetPanelEnvironment(const bool visible, const bool resetPosit
     m_sizeChangeAni->setEndValue(surfaceSize(r.size(), position));
     m_mainPanel->setFixedSize(m_settings->windowSize(m_screen));
     QWidget::setFixedSize(surfaceSize(r.size(), position));
-    m_posChangeAni->setEndValue(r.topLeft());
+    const QPoint windowPosition = surfacePosition(r.topLeft(), position);
+    m_posChangeAni->setEndValue(windowPosition);
     if (!Wayland::LayerShellHelper::isWayland()) {
-        QWidget::move(r.topLeft());
+        QWidget::move(windowPosition);
     }
 
     if (!resetPosition)
@@ -876,7 +895,9 @@ void MainWindow::positionCheck()
         return;
 
     // 多屏: 用本窗口屏幕的期望矩形做校验
-    const QPoint expectPos = m_settings->windowRect(m_settings->position(), false, m_screen).topLeft();
+    const Position position = m_settings->position();
+    const QPoint expectPos = surfacePosition(
+        m_settings->windowRect(position, false, m_screen).topLeft(), position);
 
     if (QPoint(pos() - expectPos).manhattanLength() < 2)
         return;
@@ -898,16 +919,17 @@ void MainWindow::onDbusNameOwnerChanged(const QString &name, const QString &oldO
     }
 }
 
-// flakewm draws no shadows for layer-shell surfaces, so in V23 mode the dock
-// surface extends past the bar on the desktop side and the shadow is painted
-// there.  The extra strip takes no input, no blur and no exclusive zone.
+// Fix the shadow problem under X11
 int MainWindow::shadowSize() const
 {
-    if (!Wayland::LayerShellHelper::isWayland() || m_settings->displayMode() != Dock::V23
-            || Dock::isV20Mode())
+    if (m_settings->displayMode() != Dock::V23)
         return 0;
 
-    return 10;
+    if (Wayland::LayerShellHelper::isWayland()) {
+        return Dock::isV20Mode() ? 0 : 10;
+    }
+
+    return m_wmHelper->hasComposite() ? 10 : 0;
 }
 
 QSize MainWindow::surfaceSize(const QSize &panelSize, const Position position) const
@@ -918,6 +940,42 @@ QSize MainWindow::surfaceSize(const QSize &panelSize, const Position position) c
         return panelSize + QSize(0, shadow);
 
     return panelSize + QSize(shadow, 0);
+}
+
+QPoint MainWindow::surfacePosition(const QPoint &panelPosition, const Position position) const
+{
+    if (Wayland::LayerShellHelper::isWayland()) {
+        return panelPosition;
+    }
+
+    QPoint p = panelPosition;
+    const int shadow = shadowSize();
+
+    if (position == Bottom) {
+        p.ry() -= shadow;
+    } else if (position == Right) {
+        p.rx() -= shadow;
+    }
+
+    return p;
+}
+
+QPoint MainWindow::panelPosition(const QPoint &surfacePosition, const Position position) const
+{
+    if (Wayland::LayerShellHelper::isWayland()) {
+        return surfacePosition;
+    }
+
+    QPoint p = surfacePosition;
+    const int shadow = shadowSize();
+
+    if (position == Bottom) {
+        p.ry() += shadow;
+    } else if (position == Right) {
+        p.rx() += shadow;
+    }
+
+    return p;
 }
 
 QPoint MainWindow::panelOffset(const Position position) const
@@ -954,7 +1012,7 @@ void MainWindow::updateShadowRegions(const bool forceStyle)
     if (!Wayland::LayerShellHelper::isWayland()) {
         const bool composite = m_wmHelper->hasComposite();
         const bool capsuleMode = Dock::isV20Mode() && composite;
-        QRegion inputRegion = capsuleMode ? QRegion() : QRegion(rect());
+        QRegion inputRegion = capsuleMode ? QRegion() : QRegion(m_mainPanel->geometry());
         QRegion blurRegion;
         QList<QPainterPath> blurPaths;
 
@@ -1049,6 +1107,31 @@ void MainWindow::paintEvent(QPaintEvent *e)
         return;
 
     const QRect panel = m_mainPanel->geometry();
+
+    if (!Wayland::LayerShellHelper::isWayland() && Dock::isV20Mode()) {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+
+        const int peakAlpha = m_settings->v23LightTheme() ? 18 : 40;
+        for (int spread = shadow; spread > 0; --spread) {
+            const qreal inner = qreal(spread - 1) / shadow;
+            const qreal outer = qreal(spread) / shadow;
+            const int alpha = qMax(1, qRound(peakAlpha
+                * ((1.0 - inner) * (1.0 - inner)
+                   - (1.0 - outer) * (1.0 - outer))));
+
+            QPainterPath path;
+            for (const QRect &capsule : m_mainPanel->v20Capsules()) {
+                const qreal radius = m_settings->v20CapsuleRadius(capsule);
+                QRectF r = capsule.translated(panel.topLeft());
+                r.adjust(-spread, -spread, spread, spread);
+                path.addRoundedRect(r, radius + spread, radius + spread);
+            }
+            painter.fillPath(path, QColor(0, 0, 0, alpha));
+        }
+        return;
+    }
+
     QRect shadowRect;
     QLinearGradient gradient;
     switch (m_settings->position()) {
