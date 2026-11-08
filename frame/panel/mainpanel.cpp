@@ -281,6 +281,15 @@ void MainPanel::updateDockDisplayMode(const DisplayMode displayMode)
 {
     m_displayMode = displayMode;
 
+    if (!Wayland::LayerShellHelper::isWayland()) {
+        if (displayMode == Dock::V23) {
+            setBlendMode(InWindowBlend);
+        } else {
+            setMaskPath(QPainterPath());
+            setBlendMode(BehindWindowBlend);
+        }
+    }
+
     const auto &itemList = m_itemController->itemList();
 
     m_showDesktopItem->setVisible(displayMode == Dock::Efficient || displayMode == Dock::Classic
@@ -403,7 +412,7 @@ void MainPanel::paintEvent(QPaintEvent *e)
         return;
     }
 
-    if (m_displayMode == Dock::V23 && Dock::isV20Mode()) {
+    if (m_displayMode == Dock::V23) {
         // DBlurEffectWidget 5 clips maskPath without enabling antialiasing.
         // On X11 that turns the V20 capsule curve into whole-pixel steps even
         // when the top-level window itself has a translucent ARGB surface.
@@ -414,12 +423,37 @@ void MainPanel::paintEvent(QPaintEvent *e)
         p.setCompositionMode(QPainter::CompositionMode_Source);
         p.fillRect(rect(), Qt::transparent);
 
-        QPainterPath path;
-        for (const QRect &capsule : m_v20Capsules) {
-            const qreal radius = DockSettings::Instance().v20CapsuleRadius(capsule);
-            path.addRoundedRect(capsule, radius, radius);
+        if (Dock::isV20Mode()) {
+            p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+            constexpr int shadowSize = 10;
+            const int peakAlpha = DockSettings::Instance().v23LightTheme() ? 18 : 40;
+            for (int spread = shadowSize; spread > 0; --spread) {
+                const qreal inner = qreal(spread - 1) / shadowSize;
+                const qreal outer = qreal(spread) / shadowSize;
+                const int alpha = qMax(1, qRound(peakAlpha
+                    * ((1.0 - inner) * (1.0 - inner)
+                       - (1.0 - outer) * (1.0 - outer))));
+
+                QPainterPath shadowPath;
+                for (const QRect &capsule : m_v20Capsules) {
+                    const qreal radius = DockSettings::Instance().v20CapsuleRadius(capsule);
+                    QRectF r = capsule;
+                    r.adjust(-spread, -spread, spread, spread);
+                    shadowPath.addRoundedRect(r, radius + spread, radius + spread);
+                }
+                p.fillPath(shadowPath, QColor(0, 0, 0, alpha));
+            }
+
+            QPainterPath path;
+            for (const QRect &capsule : m_v20Capsules) {
+                const qreal radius = DockSettings::Instance().v20CapsuleRadius(capsule);
+                path.addRoundedRect(capsule, radius, radius);
+            }
+            p.setCompositionMode(QPainter::CompositionMode_Source);
+            p.fillPath(path, maskColor());
+        } else {
+            p.fillRect(rect(), maskColor());
         }
-        p.fillPath(path, maskColor());
         return;
     }
 

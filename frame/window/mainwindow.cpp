@@ -1011,7 +1011,8 @@ void MainWindow::updateShadowRegions(const bool forceStyle)
 
     if (!Wayland::LayerShellHelper::isWayland()) {
         const bool composite = m_wmHelper->hasComposite();
-        const bool capsuleMode = Dock::isV20Mode() && composite;
+        const bool manualBlur = m_settings->displayMode() == Dock::V23 && composite;
+        const bool capsuleMode = Dock::isV20Mode() && manualBlur;
         QRegion inputRegion = capsuleMode ? QRegion() : QRegion(m_mainPanel->geometry());
         QRegion blurRegion;
         QList<QPainterPath> blurPaths;
@@ -1029,7 +1030,7 @@ void MainWindow::updateShadowRegions(const bool forceStyle)
                 path.addRoundedRect(windowCapsule, radius, radius);
                 blurPaths.append(path);
             }
-        } else if (composite) {
+        } else if (manualBlur) {
             const QRect panel = m_mainPanel->geometry();
             blurRegion = QRegion(panel);
 
