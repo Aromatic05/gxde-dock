@@ -53,6 +53,7 @@
 DWIDGET_USE_NAMESPACE
 
 extern const QPoint rawXPosition(const QPoint &scaledPos);
+extern const QPoint scaledPos(const QPoint &rawXPos);
 
 namespace {
 
@@ -460,7 +461,8 @@ DockSettings::DockSettings(QWidget *parent)
             // 无法送达 menuActionClicked，设置无法生效。
             // 因此统一判断指针下的窗口是否为 dock 菜单相关部件：
             // 命中任意菜单/子菜单/弹出窗口时忽略，命中菜单外才关闭菜单。
-            QWidget *widgetUnderCursor = QApplication::widgetAt(mousePos);
+            QWidget *widgetUnderCursor = QApplication::widgetAt(
+                scaledPos(mousePos));
             bool hitMenu = false;
             for (QWidget *w = widgetUnderCursor; w != nullptr; w = w->parentWidget()) {
                 if (w->inherits("QMenu")) {
@@ -797,7 +799,7 @@ void DockSettings::showDockSettingsMenu(QWidget *sourceWindow,
 
     // X11下注册全局鼠标监听，使点击菜单外部时能关闭菜单
     if (m_menuRegionMonitor && !m_menuRegionMonitor->registered()) {
-        m_menuRegionMonitor->setWatchedRegion(QRegion(targetScreen->geometry()));
+        m_menuRegionMonitor->setWatchedRegion(QRegion());
         m_menuRegionMonitor->registerRegion();
     }
 

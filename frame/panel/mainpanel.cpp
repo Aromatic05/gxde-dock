@@ -147,7 +147,6 @@ MainPanel::MainPanel(DockItemController *controller, QWidget *parent)
     connect(&DockSettings::Instance(), &DockSettings::v20CapsuleChanged,
             m_itemAdjustTimer, static_cast<void (QTimer::*)()>(&QTimer::start));
     connect(&DockSettings::Instance(), &DockSettings::v20CapsuleChanged, this, [this] {
-        m_v20Capsules.clear();
         m_v20CapsuleTimer->start();
     });
 
@@ -403,6 +402,27 @@ void MainPanel::paintEvent(QPaintEvent *e)
         p.fillRect(rect(), QColor(0, 0, 0, DockSettings::Instance().Opacity()));
         return;
     }
+
+    if (m_displayMode == Dock::V23 && Dock::isV20Mode()) {
+        // DBlurEffectWidget 5 clips maskPath without enabling antialiasing.
+        // On X11 that turns the V20 capsule curve into whole-pixel steps even
+        // when the top-level window itself has a translucent ARGB surface.
+        // Keep DTK's native blur area, but paint its mask color through an
+        // antialiased path here.
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setCompositionMode(QPainter::CompositionMode_Source);
+        p.fillRect(rect(), Qt::transparent);
+
+        QPainterPath path;
+        for (const QRect &capsule : m_v20Capsules) {
+            const qreal radius = DockSettings::Instance().v20CapsuleRadius(capsule);
+            path.addRoundedRect(capsule, radius, radius);
+        }
+        p.fillPath(path, maskColor());
+        return;
+    }
+
     DBlurEffectWidget::paintEvent(e);
 }
 

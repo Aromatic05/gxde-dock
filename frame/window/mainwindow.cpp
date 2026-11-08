@@ -391,6 +391,10 @@ void MainWindow::compositeChanged()
 
     m_mainPanel->setComposite(composite);
 
+    if (!Wayland::LayerShellHelper::isWayland()) {
+        updateShadowRegions(true);
+    }
+
     m_shadowMaskOptimizeTimer->start();
     m_positionUpdateTimer->start();
 }
@@ -465,7 +469,9 @@ void MainWindow::initConnections()
     connect(m_mainPanel, &MainPanel::requestRefershWindowVisible, this, &MainWindow::updatePanelVisible, Qt::QueuedConnection);
     connect(m_mainPanel, &MainPanel::requestWindowAutoHide, m_settings, &DockSettings::setAutoHide);
     connect(m_mainPanel, &MainPanel::geometryChanged, this, &MainWindow::panelGeometryChanged);
-    connect(m_mainPanel, &MainPanel::v20CapsulesChanged, this, [this] { updateShadowRegions(); });
+    connect(m_mainPanel, &MainPanel::v20CapsulesChanged, this, [this] {
+        updateShadowRegions(!Wayland::LayerShellHelper::isWayland());
+    });
     connect(m_settings, &DockSettings::v20CapsuleChanged, this, &MainWindow::setStrutPartial, Qt::QueuedConnection);
 
     connect(m_positionUpdateTimer, &QTimer::timeout, this, &MainWindow::updatePosition, Qt::QueuedConnection);
@@ -946,17 +952,50 @@ void MainWindow::updateShadowRegions(const bool forceStyle)
     }
 
     if (!Wayland::LayerShellHelper::isWayland()) {
-        QRegion region;
-        if (Dock::isV20Mode() && m_wmHelper->hasComposite()) {
+        const bool composite = m_wmHelper->hasComposite();
+        const bool capsuleMode = Dock::isV20Mode() && composite;
+        QRegion inputRegion = capsuleMode ? QRegion() : QRegion(rect());
+        QRegion blurRegion;
+        QList<QPainterPath> blurPaths;
+
+        if (capsuleMode) {
             for (const QRect &capsule : m_mainPanel->v20Capsules()) {
                 const int radius = m_settings->v20CapsuleRadius(capsule);
-                region += Wayland::LayerShellStyler::roundedRegion(
-                    capsule.translated(m_mainPanel->pos()), radius);
+                const QRect windowCapsule = capsule.translated(m_mainPanel->pos());
+                const QRegion rounded =
+                    Wayland::LayerShellStyler::roundedRegion(windowCapsule, radius);
+                inputRegion += rounded;
+                blurRegion += rounded;
+
+                QPainterPath path;
+                path.addRoundedRect(windowCapsule, radius, radius);
+                blurPaths.append(path);
             }
+        } else if (composite) {
+            const QRect panel = m_mainPanel->geometry();
+            blurRegion = QRegion(panel);
+
+            QPainterPath path;
+            path.addRoundedRect(panel, m_mainPanel->blurRectXRadius(),
+                                m_mainPanel->blurRectYRadius());
+            blurPaths.append(path);
         }
-        if (region != m_dockBlurRegion) {
-            m_dockBlurRegion = region;
-            window->setMask(region);
+
+        if (forceStyle || inputRegion != m_dockInputRegion) {
+            m_dockInputRegion = inputRegion;
+            // A QWindow mask becomes the X Shape bounding region. It is
+            // binary, so using it for the visible capsule edge discards the
+            // antialiased pixels painted by MainPanel. Keep the translucent
+            // window rectangular and shape only pointer input instead.
+            m_xcbMisc->set_input_region(winId(), inputRegion, devicePixelRatioF());
+        }
+
+        if (forceStyle || blurRegion != m_dockBlurRegion) {
+            m_dockBlurRegion = blurRegion;
+            // DTK 5's setMaskPath() repaints the widget but does not resubmit
+            // the X11 WM blur property. Keep it synchronized explicitly as
+            // capsule groups are added, removed or rearranged.
+            m_platformWindowHandle.setWindowBlurAreaByWM(blurPaths);
         }
         return;
     }

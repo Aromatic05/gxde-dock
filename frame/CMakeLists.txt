@@ -19,6 +19,7 @@ pkg_check_modules(dtk2widget REQUIRED dtk2widget)
 pkg_check_modules(dtk6core REQUIRED dtk6core)
 pkg_check_modules(dtk6gui REQUIRED dtk6gui)
 pkg_check_modules(XCB_EWMH REQUIRED xcb-ewmh x11)
+pkg_check_modules(XCB_SHAPE REQUIRED xcb-shape)
 pkg_check_modules(QGSettings REQUIRED gsettings-qt6)
 
 # Qt6 VER. of dframeworkdbus
@@ -32,6 +33,7 @@ target_include_directories(${BIN_NAME} PUBLIC ${dtk2widget_INCLUDE_DIRS}
                                               ${dtk6core_INCLUDE_DIRS}
                                               ${dtk6gui_INCLUDE_DIRS}
                                               ${XCB_EWMH_INCLUDE_DIRS}
+                                              ${XCB_SHAPE_INCLUDE_DIRS}
                                               /usr/include/libdframeworkdbus-2.0
                                               ${PROJECT_BINARY_DIR}
                                               ${QGSettings_INCLUDE_DIRS}
@@ -46,6 +48,7 @@ target_link_libraries(${BIN_NAME} PRIVATE
     ${dtk6core_LIBRARIES}
     ${dtk6gui_LIBRARIES}
     ${XCB_EWMH_LIBRARIES}
+    ${XCB_SHAPE_LIBRARIES}
     ${QGSettings_LIBRARIES}
     DFrameworkdbusQt6::DFrameworkdbusQt6
     LayerShellQt::Interface

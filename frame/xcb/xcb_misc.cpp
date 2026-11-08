@@ -21,9 +21,13 @@
 
 #include <QDebug>
 #include <QApplication>
+#include <QtMath>
 
 #include <xcb/xcb.h>
 #include <xcb/xcb_ewmh.h>
+#include <xcb/shape.h>
+
+#include <limits>
 #include <dapplication.h>
 
 #include "xcb_misc.h"
@@ -144,4 +148,38 @@ void XcbMisc::set_window_icon_geometry(xcb_window_t winId, QRect geo)
     const auto ratio = qApp->devicePixelRatio();
 
     xcb_ewmh_set_wm_icon_geometry(&m_ewmh_connection, winId, geo.x() * ratio, geo.y() * ratio, geo.width() * ratio, geo.height() * ratio);
+}
+
+void XcbMisc::set_input_region(xcb_window_t winId, const QRegion &region, qreal devicePixelRatio)
+{
+    if (Wayland::LayerShellHelper::isWayland()) {
+        return;
+    }
+
+    QVector<xcb_rectangle_t> rectangles;
+    rectangles.reserve(region.rectCount());
+
+    for (const QRect &rect : region) {
+        const int x = qFloor(rect.x() * devicePixelRatio);
+        const int y = qFloor(rect.y() * devicePixelRatio);
+        const int right = qCeil((rect.x() + rect.width()) * devicePixelRatio);
+        const int bottom = qCeil((rect.y() + rect.height()) * devicePixelRatio);
+
+        xcb_rectangle_t nativeRect;
+        nativeRect.x = qBound(static_cast<int>(std::numeric_limits<int16_t>::min()), x,
+                              static_cast<int>(std::numeric_limits<int16_t>::max()));
+        nativeRect.y = qBound(static_cast<int>(std::numeric_limits<int16_t>::min()), y,
+                              static_cast<int>(std::numeric_limits<int16_t>::max()));
+        nativeRect.width = qBound<int>(0, right - x,
+                                       std::numeric_limits<uint16_t>::max());
+        nativeRect.height = qBound<int>(0, bottom - y,
+                                        std::numeric_limits<uint16_t>::max());
+        rectangles.append(nativeRect);
+    }
+
+    xcb_connection_t *connection = x11Connection();
+    xcb_shape_rectangles(connection, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_INPUT,
+                         XCB_CLIP_ORDERING_UNSORTED, winId, 0, 0,
+                         rectangles.size(), rectangles.constData());
+    xcb_flush(connection);
 }

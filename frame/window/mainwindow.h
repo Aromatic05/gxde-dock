@@ -129,6 +129,7 @@ private:
     DockSettings *m_settings;
     QMetaObject::Connection m_screenChangeConn;
     QRegion m_dockBlurRegion;
+    QRegion m_dockInputRegion;
 
     QDBusConnectionInterface *m_dbusDaemonInterface;
     org::kde::StatusNotifierWatcher *m_sniWatcher;
